@@ -1,0 +1,48 @@
+name: Daily Crypto Macro Report
+
+# 매일 한국시간 오전 8시(UTC 23:00 전날)에 실행
+on:
+  schedule:
+    - cron: '0 23 * * *'  # UTC 23:00 = 한국시간 다음날 08:00
+  workflow_dispatch:  # 수동 실행도 가능
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 저장소 코드 다운로드
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Python 설정
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # 3. 패키지 설치
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4. 메인 스크립트 실행 (FACT 수집 + ANALYSIS 생성)
+      - name: Run daily report
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          GOOGLE_GENERATIVEAI_API_KEY: ${{ secrets.GOOGLE_GENERATIVEAI_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: python main.py
+
+      # 5. 생성된 데이터 파일 커밋 및 푸시
+      - name: Commit and push results
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/
+          git commit -m "Daily report: $(date -u +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
+
+      # 6. 실패 시 알림 (선택: GitHub Issues에 자동 이슈 생성)
+      - name: Report failure
+        if: failure()
+        run: echo "Daily report failed. Check the logs above."
