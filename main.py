@@ -23,14 +23,22 @@ import requests
 # 분석 모듈 - Google Gemini
 import google.generativeai as genai
 
+# Notion API
+from notion_client import Client
+
 load_dotenv()
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_GENERATIVEAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY")
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
+NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query"
 ANALYSIS_MODEL = "gemini-3.5-flash-lite"  # 최신 무료 모델
+
+# Notion 클라이언트
+notion_client = Client(auth=NOTION_TOKEN) if NOTION_TOKEN else None
 
 # ============================= 공통 유틸 =============================
 
@@ -265,6 +273,148 @@ def save_analysis(text: str, fact_json_path: str):
     return out_path
 
 
+# ============================= Notion 저장 =============================
+
+def save_to_notion(fact_data: dict):
+    """수집한 FACT 데이터를 Notion 경제 뉴스보드에 저장"""
+    if not notion_client or not NOTION_DATABASE_ID:
+        print("[WARN] Notion API 설정 없음. Notion 저장 건너뜀.")
+        return
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # 저장할 데이터 항목들 (카테고리별)
+    rows_to_save = []
+
+    # ① 거시경제
+    macro = fact_data.get("macro", {})
+    if macro.get("fed_funds_rate"):
+        rows_to_save.append({
+            "이름": "Fed 기금금리",
+            "카테고리": "거시경제",
+            "지표명": "FEDFUNDS",
+            "현재값": float(macro["fed_funds_rate"]["value"]),
+            "분석": f"기준금리 {macro['fed_funds_rate']['value']}% (기준일: {macro['fed_funds_rate']['date']})",
+            "출처": "FRED"
+        })
+    
+    if macro.get("treasury_10y"):
+        rows_to_save.append({
+            "이름": "미국 10년물 국채",
+            "카테고리": "거시경제",
+            "지표명": "DGS10",
+            "현재값": float(macro["treasury_10y"]["value"]),
+            "분석": f"10년물 {macro['treasury_10y']['value']}% (기준일: {macro['treasury_10y']['date']})",
+            "출처": "FRED"
+        })
+    
+    if macro.get("fred_dollar_index"):
+        rows_to_save.append({
+            "이름": "달러지수",
+            "카테고리": "거시경제",
+            "지표명": "DTWEXBGS",
+            "현재값": float(macro["fred_dollar_index"]["value"]),
+            "분석": f"연준 달러지수 {macro['fred_dollar_index']['value']} (기준일: {macro['fred_dollar_index']['date']})",
+            "출처": "FRED"
+        })
+
+    # ② 크립토
+    crypto = fact_data.get("crypto", {})
+    prices = crypto.get("prices", {})
+    
+    if prices.get("bitcoin"):
+        btc = prices["bitcoin"]
+        rows_to_save.append({
+            "이름": "BTC",
+            "카테고리": "크립토",
+            "지표명": "BTC/USD",
+            "현재값": btc.get("usd", 0),
+            "변화율": btc.get("usd_24h_change", 0),
+            "분석": f"BTC ${btc['usd']} (24H: {btc['usd_24h_change']:.2f}%)",
+            "출처": "CoinGecko"
+        })
+    
+    if prices.get("ethereum"):
+        eth = prices["ethereum"]
+        rows_to_save.append({
+            "이름": "ETH",
+            "카테고리": "크립토",
+            "지표명": "ETH/USD",
+            "현재값": eth.get("usd", 0),
+            "변화율": eth.get("usd_24h_change", 0),
+            "분석": f"ETH ${eth['usd']} (24H: {eth['usd_24h_change']:.2f}%)",
+            "출처": "CoinGecko"
+        })
+    
+    if crypto.get("btc_dominance_pct"):
+        rows_to_save.append({
+            "이름": "BTC Dominance",
+            "카테고리": "크립토",
+            "지표명": "BTC.D",
+            "현재값": crypto["btc_dominance_pct"],
+            "분석": f"BTC 도미넌스 {crypto['btc_dominance_pct']:.2f}%",
+            "출처": "CoinGecko"
+        })
+
+    # ③ 선물
+    futures_btc = fact_data.get("futures_btc", {})
+    if futures_btc.get("open_interest"):
+        rows_to_save.append({
+            "이름": "BTC OI",
+            "카테고리": "선물",
+            "지표명": "BTC Open Interest",
+            "현재값": float(futures_btc["open_interest"]),
+            "분석": f"BTC OI: {futures_btc['open_interest']}",
+            "출처": "Binance"
+        })
+    
+    if futures_btc.get("funding_rate"):
+        rows_to_save.append({
+            "이름": "BTC Funding Rate",
+            "카테고리": "선물",
+            "지표명": "BTC Funding",
+            "현재값": float(futures_btc["funding_rate"]),
+            "분석": f"BTC 펀딩비: {futures_btc['funding_rate']}",
+            "출처": "Binance"
+        })
+
+    # ④ 온체인
+    onchain = fact_data.get("onchain", {})
+    if onchain.get("defi_tvl_usd"):
+        rows_to_save.append({
+            "이름": "DeFi TVL",
+            "카테고리": "온체인",
+            "지표명": "DeFi TVL",
+            "현재값": onchain["defi_tvl_usd"] / 1e9,  # 십억 단위로
+            "분석": f"DeFi TVL: ${onchain['defi_tvl_usd']/1e9:.2f}B",
+            "출처": "DefiLlama"
+        })
+
+    # Notion에 저장
+    print(f"📝 Notion에 {len(rows_to_save)}개 행 저장 중...")
+    success_count = 0
+    for row in rows_to_save:
+        try:
+            notion_client.pages.create(
+                parent={"database_id": NOTION_DATABASE_ID},
+                properties={
+                    "날짜": {"date": {"start": today}},
+                    "이름": {"title": [{"text": {"content": row["이름"]}}]},
+                    "카테고리": {"select": {"name": row["카테고리"]}},
+                    "지표명": {"rich_text": [{"text": {"content": row["지표명"]}}]},
+                    "현재값": {"number": row.get("현재값")},
+                    "변화율": {"number": row.get("변화율")},
+                    "분석": {"rich_text": [{"text": {"content": row["분석"]}}]},
+                    "출처": {"rich_text": [{"text": {"content": row["출처"]}}]},
+                }
+            )
+            success_count += 1
+        except Exception as e:
+            print(f"[WARN] Notion 저장 실패 ({row['이름']}): {e}")
+    
+    print(f"✅ Notion 저장 완료: {success_count}/{len(rows_to_save)}")
+
+
 # ============================= 메인 실행 =============================
 
 if __name__ == "__main__":
@@ -290,11 +440,17 @@ if __name__ == "__main__":
     # ANALYSIS 저장 및 출력
     analysis_path = save_analysis(analysis_text, fact_path)
 
+    # Notion에 저장
+    print("\n📌 Notion에 자동 저장 중...")
+    save_to_notion(fact_data)
+
     # 최종 결과 콘솔에 출력
     print("\n" + "=" * 60)
     print("📋 오늘의 분석")
     print("=" * 60)
     print(analysis_text)
     print("\n" + "=" * 60)
-    print(f"✨ 완료! FACT와 ANALYSIS가 data 폴더에 저장되었습니다.")
+    print(f"✨ 완료! FACT와 ANALYSIS가 저장되었습니다.")
+    print(f"   - 로컬: data/ 폴더")
+    print(f"   - 노션: 경제 뉴스보드 → 각 뷰별로 자동 분류")
     print("=" * 60)
