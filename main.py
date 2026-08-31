@@ -18,11 +18,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
+# UTF-8 인코딩 설정 (Windows 호환)
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
 # 수집 모듈
 import requests
 
 # 분석 모듈 - Google Gemini
-import google.generativeai as genai
+import google.genai as genai
 
 # Notion API
 from notion_client import Client
@@ -36,7 +42,7 @@ NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query"
-ANALYSIS_MODEL = "gemini-3.6-flash"  # 더 빠른 모델 시도
+ANALYSIS_MODEL = "gemini-3.6-flash"  # 빠르고 효율적
 
 # Notion 클라이언트
 notion_client = Client(auth=NOTION_TOKEN) if NOTION_TOKEN else None
@@ -231,15 +237,15 @@ def analyze(data: dict) -> str:
             "GOOGLE_GENERATIVEAI_API_KEY 또는 GEMINI_API_KEY 를 .env에 추가하세요."
         )
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        ANALYSIS_MODEL,
-        system_instruction=SYSTEM_PROMPT
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=ANALYSIS_MODEL,
+        contents=build_user_prompt(data),
+        config={
+            "system_instruction": SYSTEM_PROMPT,
+            "temperature": 0.7,
+        }
     )
-    response = model.generate_content(
-    build_user_prompt(data),
-    request_options={"timeout": 60.0}  # 타임아웃을 60초로 늘림
-)
     return response.text
 
 

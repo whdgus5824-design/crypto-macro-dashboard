@@ -21,9 +21,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 3. 패키지 설치
+      # 3. 패키지 설치 (캐시 무시하고 최신 버전)
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install --no-cache-dir --force-reinstall -r requirements.txt
 
       # 4. 메인 스크립트 실행 (FACT 수집 + ANALYSIS 생성)
       - name: Debug environment
