@@ -1,0 +1,117 @@
+{
+  "collected_at_utc": "2026-08-31T03:58:18.396191+00:00",
+  "macro": {
+    "fed_funds_rate": {
+      "date": "2026-07-01",
+      "value": "3.6300000000"
+    },
+    "treasury_2y": {
+      "date": "2026-08-27",
+      "value": "4.2"
+    },
+    "treasury_10y": {
+      "date": "2026-08-27",
+      "value": "4.67"
+    },
+    "fred_dollar_index": {
+      "date": "2026-08-21",
+      "value": "118.0628000000"
+    },
+    "cpi": {
+      "date": "2026-07-01",
+      "value": "332.813"
+    },
+    "pce": {
+      "date": "2026-07-01",
+      "value": "131.659"
+    },
+    "wti": {
+      "date": "2026-08-25",
+      "value": "83.9"
+    },
+    "gdp": {
+      "date": "2026-04-01",
+      "value": "32486.066"
+    },
+    "unemployment": {
+      "date": "2026-07-01",
+      "value": "4.1"
+    },
+    "nonfarm_payroll": {
+      "date": "2026-07-01",
+      "value": "158858"
+    },
+    "ice_dxy": null
+  },
+  "liquidity": {
+    "m2_us": {
+      "date": "2026-07-01",
+      "value": "23218"
+    },
+    "fed_balance_sheet": {
+      "date": "2026-08-26",
+      "value": "6730912"
+    },
+    "tga": {
+      "date": "2026-08-26",
+      "value": "950736"
+    },
+    "rrp": {
+      "date": "2026-08-28",
+      "value": "0.175"
+    },
+    "stablecoin_total_supply_usd": 311251541987.3032,
+    "global_m2": null
+  },
+  "crypto": {
+    "prices": {
+      "bitcoin": {
+        "usd": 77765,
+        "usd_24h_vol": 21139088324.25078,
+        "usd_24h_change": -0.48966207980231113
+      },
+      "ethereum": {
+        "usd": 2421.3,
+        "usd_24h_vol": 12260165341.349012,
+        "usd_24h_change": -1.4483466462380796
+      }
+    },
+    "btc_dominance_pct": 59.671489134623776,
+    "eth_dominance_pct": 11.1650536593821,
+    "total_market_cap_usd": 2610244955012.847,
+    "total_volume_usd": 64673509040.719376
+  },
+  "futures_btc": {
+    "symbol": "BTCUSDT",
+    "open_interest": "106540.006",
+    "funding_rate": "0.00007271",
+    "long_short_ratio": {
+      "symbol": "BTCUSDT",
+      "longAccount": "0.5209",
+      "longShortRatio": "1.0872",
+      "shortAccount": "0.4791",
+      "timestamp": 1788145200000
+    },
+    "volume_24h": "105408.869",
+    "price_change_pct_24h": "-0.513"
+  },
+  "futures_eth": {
+    "symbol": "ETHUSDT",
+    "open_interest": "2337709.965",
+    "funding_rate": "0.00002364",
+    "long_short_ratio": {
+      "symbol": "ETHUSDT",
+      "longAccount": "0.7279",
+      "longShortRatio": "2.6751",
+      "shortAccount": "0.2721",
+      "timestamp": 1788145200000
+    },
+    "volume_24h": "3703644.337",
+    "price_change_pct_24h": "-1.469"
+  },
+  "onchain": {
+    "defi_tvl_usd": 87026650958,
+    "dex_volume_24h_usd": 7680241925.160003,
+    "fees_24h_usd": 70343535.82
+  }
+}
