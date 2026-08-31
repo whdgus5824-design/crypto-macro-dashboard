@@ -36,7 +36,7 @@ NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query"
-ANALYSIS_MODEL = "gemini-3.5-flash-lite"
+ANALYSIS_MODEL = "gemini-3.6-flash"  # 더 빠른 모델 시도
 
 # Notion 클라이언트
 notion_client = Client(auth=NOTION_TOKEN) if NOTION_TOKEN else None
@@ -236,7 +236,10 @@ def analyze(data: dict) -> str:
         ANALYSIS_MODEL,
         system_instruction=SYSTEM_PROMPT
     )
-    response = model.generate_content(build_user_prompt(data))
+    response = model.generate_content(
+    build_user_prompt(data),
+    request_options={"timeout": 60.0}  # 타임아웃을 60초로 늘림
+)
     return response.text
 
 
