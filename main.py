@@ -1,67 +1,49 @@
 """
 경제/크립토 자동화 메인 스크립트 - GitHub Actions 호환 버전
-Binance 제거 (GitHub 서버 IP 차단됨)
-FACT 수집 + ANALYSIS 분석을 한 번에 실행합니다 (완전 무료).
-
-실행:
-  python main.py
-
-결과:
-  data/2026-08-24.json (FACT)
-  data/2026-08-24_analysis.md (ANALYSIS)
+FACT 수집 + ANALYSIS 분석 + Notion 저장을 한 번에 실행합니다.
 """
 
 import os
 import sys
+import time
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from dotenv import load_dotenv
 
-# UTF-8 인코딩 설정 (Windows 호환)
-if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-
-# 수집 모듈
 import requests
-
-# 분석 모듈 - Google Gemini
-import google.genai as genai
-
-# Notion API
+import google.generativeai as genai
 from notion_client import Client
 
 load_dotenv()
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY")
-GEMINI_API_KEY = os.environ.get("GOOGLE_GENERATIVEAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GENERATIVEAI_API_KEY")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
-FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
-ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query"
-ANALYSIS_MODEL = "gemini-3.6-flash"  # 빠르고 효율적
 
-# Notion 클라이언트
+FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+ANALYSIS_MODEL = "gemini-3.6-flash"
+
 notion_client = Client(auth=NOTION_TOKEN) if NOTION_TOKEN else None
+
 
 # ============================= 공통 유틸 =============================
 
-def _get(url, params=None, timeout=10):
-    """공통 GET 요청"""
-    try:
-        resp = requests.get(url, params=params, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"[WARN] 요청 실패: {url} -> {e}")
-        return None
+def _get(url, params=None, retries=3, timeout=30):
+    """재시도 로직이 포함된 GET 요청"""
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"[WARN] 요청 실패 ({attempt + 1}/{retries}): {url} -> {e}")
+            if attempt < retries - 1:
+                time.sleep(3)
+    return None
 
 
 def _fred_latest(series_id):
-    """FRED 최신값"""
     if not FRED_API_KEY:
         print("[WARN] FRED_API_KEY가 설정되지 않았습니다")
         return None
@@ -79,33 +61,10 @@ def _fred_latest(series_id):
     return {"date": obs["date"], "value": obs["value"]}
 
 
-def _get_alpha_vantage_quote(symbol):
-    """Alpha Vantage Global Quote API로 최신 가격 조회"""
-    if not ALPHA_VANTAGE_API_KEY:
-        return None
-    params = {
-        "function": "GLOBAL_QUOTE",
-        "symbol": symbol,
-        "apikey": ALPHA_VANTAGE_API_KEY,
-    }
-    data = _get(ALPHA_VANTAGE_BASE, params=params)
-    if not data or "Global Quote" not in data:
-        return None
-    quote = data["Global Quote"]
-    if not quote or "05. price" not in quote:
-        return None
-    return {
-        "price": float(quote.get("05. price", 0)),
-        "change": float(quote.get("09. change", 0)),
-        "change_percent": float(quote.get("10. change percent", "0").replace("%", "")),
-        "timestamp": quote.get("07. latest trading day", "N/A"),
-    }
-
-
 # ============================= FACT 수집 =============================
 
 def collect_macro():
-    macro_data = {
+    return {
         "fed_funds_rate": _fred_latest("FEDFUNDS"),
         "treasury_2y": _fred_latest("DGS2"),
         "treasury_10y": _fred_latest("DGS10"),
@@ -117,14 +76,6 @@ def collect_macro():
         "unemployment": _fred_latest("UNRATE"),
         "nonfarm_payroll": _fred_latest("PAYEMS"),
     }
-    
-    dxy_quote = _get_alpha_vantage_quote("DXY")
-    if dxy_quote:
-        macro_data["ice_dxy"] = dxy_quote
-    else:
-        macro_data["ice_dxy"] = None
-    
-    return macro_data
 
 
 def collect_liquidity():
@@ -171,7 +122,6 @@ def collect_crypto(coins=("bitcoin", "ethereum")):
 def collect_onchain():
     tvl = _get("https://api.llama.fi/v2/historicalChainTvl")
     latest_tvl = tvl[-1] if tvl else None
-
     dex_volume = _get("https://api.llama.fi/overview/dexs", params={"excludeTotalDataChart": "true"})
     fees = _get("https://api.llama.fi/overview/fees", params={"excludeTotalDataChart": "true"})
 
@@ -190,7 +140,7 @@ def collect_all():
         "liquidity": collect_liquidity(),
         "crypto": collect_crypto(),
         "onchain": collect_onchain(),
-        "note": "Binance Futures 데이터는 GitHub Actions 호환성을 위해 제외됨"
+        "note": "Binance Futures 데이터는 GitHub Actions 호환성을 위해 제외됨",
     }
     print("✅ FACT 수집 완료")
     return result
@@ -214,11 +164,9 @@ SYSTEM_PROMPT = """당신은 거시경제/크립토 데이터를 해석하는 �
 1. 입력으로 주어진 JSON 안의 숫자만 근거로 삼습니다. JSON에 없는 사실, 뉴스, 사건을 지어내지 마세요.
 2. 값이 null이거나 없는 항목은 "데이터 없음"이라고 명시하고, 억지로 해석하지 마세요.
 3. 반드시 [FACT] -> [ANALYSIS] 구조로 작성하세요.
-   - [FACT]: 입력 JSON의 숫자를 그대로 요약 (단위, 날짜 포함)
-   - [ANALYSIS]: 그 숫자가 시장에 어떤 의미인지 1~2문장, 과장 없이
 4. 카테고리는 다음 4개 순서로: 거시경제 / 유동성 / 크립토 / 온체인
-5. 각 카테고리는 3~5줄 이내로 짧게. 전체 응답은 A4 반 페이지를 넘기지 않습니다.
-6. 확정적 예측("반드시 오른다")이나 투자 조언(매수/매도 지시)은 하지 않습니다. 해석만 제공합니다.
+5. 각 카테고리는 3~5줄 이내로 짧게.
+6. 확정적 예측이나 투자 조언은 하지 않습니다.
 """
 
 
@@ -232,21 +180,28 @@ def build_user_prompt(data: dict) -> str:
 
 def analyze(data: dict) -> str:
     if not GEMINI_API_KEY:
-        raise RuntimeError(
-            "GEMINI_API_KEY가 .env에 없습니다. "
-            "GOOGLE_GENERATIVEAI_API_KEY 또는 GEMINI_API_KEY 를 .env에 추가하세요."
-        )
+        raise RuntimeError("GEMINI_API_KEY가 없습니다. .env 또는 GitHub Secrets를 확인하세요.")
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(
-        model=ANALYSIS_MODEL,
-        contents=build_user_prompt(data),
-        config={
-            "system_instruction": SYSTEM_PROMPT,
-            "temperature": 0.7,
-        }
-    )
-    return response.text
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(ANALYSIS_MODEL, system_instruction=SYSTEM_PROMPT)
+
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(
+                build_user_prompt(data),
+                request_options={"timeout": 60.0},
+            )
+            return response.text
+        except Exception as e:
+            error_msg = str(e)
+            is_overload = "503" in error_msg or "UNAVAILABLE" in error_msg
+            if is_overload and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 15
+                print(f"[WARN] Gemini 서버 과부하. {wait_time}초 후 재시도 ({attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            raise
 
 
 def save_analysis(text: str, fact_json_path: str):
@@ -260,66 +215,45 @@ def save_analysis(text: str, fact_json_path: str):
 # ============================= Notion 저장 =============================
 
 def save_to_notion(fact_data: dict):
-    """수집한 FACT 데이터를 Notion에 저장"""
     if not notion_client or not NOTION_DATABASE_ID:
         print("[WARN] Notion API 설정 없음. Notion 저장 건너뜀.")
         return
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
     rows_to_save = []
 
-    # ① 거시경제
     macro = fact_data.get("macro", {})
     if macro.get("fed_funds_rate"):
         rows_to_save.append({
-            "이름": "Fed 기금금리",
-            "카테고리": "거시경제",
-            "지표명": "FEDFUNDS",
+            "이름": "Fed 기금금리", "카테고리": "거시경제", "지표명": "FEDFUNDS",
             "현재값": float(macro["fed_funds_rate"]["value"]),
-            "분석": f"기준금리 {macro['fed_funds_rate']['value']}%",
-            "출처": "FRED"
+            "분석": f"기준금리 {macro['fed_funds_rate']['value']}%", "출처": "FRED"
         })
-    
     if macro.get("treasury_10y"):
         rows_to_save.append({
-            "이름": "미국 10년물 국채",
-            "카테고리": "거시경제",
-            "지표명": "DGS10",
+            "이름": "미국 10년물 국채", "카테고리": "거시경제", "지표명": "DGS10",
             "현재값": float(macro["treasury_10y"]["value"]),
-            "분석": f"10년물 {macro['treasury_10y']['value']}%",
-            "출처": "FRED"
+            "분석": f"10년물 {macro['treasury_10y']['value']}%", "출처": "FRED"
         })
 
-    # ② 크립토
     crypto = fact_data.get("crypto", {})
     prices = crypto.get("prices", {})
-    
     if prices.get("bitcoin"):
         btc = prices["bitcoin"]
         rows_to_save.append({
-            "이름": "BTC",
-            "카테고리": "크립토",
-            "지표명": "BTC/USD",
-            "현재값": btc.get("usd", 0),
-            "변화율": btc.get("usd_24h_change", 0),
-            "분석": f"BTC ${btc['usd']}",
-            "출처": "CoinGecko"
+            "이름": "BTC", "카테고리": "크립토", "지표명": "BTC/USD",
+            "현재값": btc.get("usd", 0), "변화율": btc.get("usd_24h_change", 0),
+            "분석": f"BTC ${btc['usd']}", "출처": "CoinGecko"
         })
 
-    # ③ 온체인
     onchain = fact_data.get("onchain", {})
     if onchain.get("defi_tvl_usd"):
         rows_to_save.append({
-            "이름": "DeFi TVL",
-            "카테고리": "온체인",
-            "지표명": "DeFi TVL",
+            "이름": "DeFi TVL", "카테고리": "온체인", "지표명": "DeFi TVL",
             "현재값": onchain["defi_tvl_usd"] / 1e9,
-            "분석": f"DeFi TVL: ${onchain['defi_tvl_usd']/1e9:.2f}B",
-            "출처": "DefiLlama"
+            "분석": f"DeFi TVL: ${onchain['defi_tvl_usd']/1e9:.2f}B", "출처": "DefiLlama"
         })
 
-    # Notion에 저장
     print(f"📝 Notion에 {len(rows_to_save)}개 행 저장 중...")
     success_count = 0
     for row in rows_to_save:
@@ -340,7 +274,6 @@ def save_to_notion(fact_data: dict):
             success_count += 1
         except Exception as e:
             print(f"[WARN] Notion 저장 실패 ({row['이름']}): {e}")
-    
     print(f"✅ Notion 저장 완료: {success_count}/{len(rows_to_save)}")
 
 
@@ -349,36 +282,27 @@ def save_to_notion(fact_data: dict):
 if __name__ == "__main__":
     print("=" * 60)
     print("📈 경제/크립토 자동화 대시보드 - 일일 리포트")
-    print("(GitHub Actions 호환 버전 - Binance 제외)")
     print("=" * 60)
 
     try:
-        # FACT 수집
         fact_data = collect_all()
-
-        # FACT 저장
         fact_path = save_fact(fact_data)
 
-        # ANALYSIS 생성
         print("\n🤖 ANALYSIS 생성 중...")
         analysis_text = analyze(fact_data)
-
-        # ANALYSIS 저장
         analysis_path = save_analysis(analysis_text, fact_path)
 
-        # Notion에 저장
         print("\n📌 Notion에 자동 저장 중...")
         save_to_notion(fact_data)
 
-        # 최종 결과 출력
         print("\n" + "=" * 60)
         print("📋 오늘의 분석")
         print("=" * 60)
         print(analysis_text)
         print("\n" + "=" * 60)
-        print(f"✨ 완료!")
+        print("✨ 완료!")
         print("=" * 60)
-    
+
     except Exception as e:
         print(f"\n[ERROR] 실행 실패: {e}")
         sys.exit(1)
